@@ -33,23 +33,23 @@ export default function DocumentList({ documents, isLoading, error, onRefresh })
       {!isLoading && !error && documents.length > 0 && (
         <div className="document-table" role="table" aria-label="Documentos enviados">
           <div className="document-row table-header" role="row">
-            <span>Nome</span>
-            <span>Proprietário</span>
-            <span>Adicionado em</span>
-            <span aria-label="Ações" />
+            <span role="columnheader">Nome</span>
+            <span role="columnheader">Proprietário</span>
+            <span role="columnheader">Adicionado em</span>
+            <span role="columnheader" aria-label="Ações" />
           </div>
           {documents.map((document) => (
             <div className="document-row" role="row" key={document.id}>
-              <div className="document-name">
+              <div className="document-name" role="cell">
                 <span className="document-icon" aria-hidden="true">□</span>
                 <span>
                   <strong title={document.originalName}>{document.originalName}</strong>
                   <small>{Math.ceil(document.size / 1024)} KB</small>
                 </span>
               </div>
-              <span className="owner-cell">{document.owner}</span>
-              <time dateTime={document.uploadedAt}>{formatDate(document.uploadedAt)}</time>
-              <DownloadButton document={document} />
+              <span className="owner-cell" role="cell">{document.owner}</span>
+              <time role="cell" dateTime={document.uploadedAt}>{formatDate(document.uploadedAt)}</time>
+              <span role="cell"><DownloadButton document={document} /></span>
             </div>
           ))}
         </div>

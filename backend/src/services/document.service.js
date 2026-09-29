@@ -1,4 +1,3 @@
-const fs = require('node:fs');
 const { randomUUID } = require('node:crypto');
 
 class DocumentService {
@@ -15,22 +14,26 @@ class DocumentService {
       throw error;
     }
 
-    const document = {
-      id: randomUUID(),
-      originalName: file.originalname,
-      size: file.size,
-      uploadedAt: new Date().toISOString(),
-      owner: owner || this.defaultOwner,
-      storedFilename: file.filename,
-      mimetype: file.mimetype,
-    };
-
     try {
+      const normalizedOwner = this.normalizeOwner(owner);
+      await this.repository.validateFile(file);
+      const document = {
+        id: randomUUID(),
+        originalName: file.originalname,
+        size: file.size,
+        uploadedAt: new Date().toISOString(),
+        owner: normalizedOwner,
+        storedFilename: file.filename,
+        mimetype: file.mimetype,
+      };
+
       return this.repository.create(document);
     } catch (error) {
       await this.repository.removeFile(file.path);
-      error.code = error.code || 'STORAGE_ERROR';
-      error.statusCode = error.statusCode || 500;
+      if (!['FILE_CONTENT_NOT_ALLOWED', 'OWNER_INVALID'].includes(error.code)) {
+        error.code = 'STORAGE_ERROR';
+        error.statusCode = 500;
+      }
       throw error;
     }
   }
@@ -49,10 +52,13 @@ class DocumentService {
       throw error;
     }
 
-    let filePath;
     try {
-      filePath = this.repository.getFilePath(document);
-      await fs.promises.access(filePath, fs.constants.R_OK);
+      const file = await this.repository.openFile(document);
+      return {
+        ...file,
+        originalName: document.originalName,
+        mimetype: document.mimetype,
+      };
     } catch (error) {
       if (error.code === 'INVALID_STORED_FILENAME') {
         error.statusCode = 500;
@@ -64,12 +70,18 @@ class DocumentService {
       fileError.statusCode = 404;
       throw fileError;
     }
+  }
 
-    return {
-      filePath,
-      originalName: document.originalName,
-      mimetype: document.mimetype,
-    };
+  normalizeOwner(owner) {
+    const candidate = (owner || this.defaultOwner).trim();
+    if (!candidate || candidate.length > 100 || /[\r\n]/.test(candidate)) {
+      const error = new Error('Identificador de usuário inválido');
+      error.code = 'OWNER_INVALID';
+      error.statusCode = 400;
+      throw error;
+    }
+
+    return candidate;
   }
 }
 
