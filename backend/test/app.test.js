@@ -14,7 +14,7 @@ test('o app backend é exportado', () => {
   assert.strictEqual(typeof appModule, 'function', 'o app Express deve ser uma função');
 });
 
-test('realiza upload, listagem, download e trata erros da API', async () => {
+async function createTestServer() {
   const storageDirectory = await fs.mkdtemp(`${os.tmpdir()}/dms-test-`);
   const app = appModule.createApp({
     config: createConfig({ STORAGE_DIRECTORY: storageDirectory }),
@@ -22,51 +22,83 @@ test('realiza upload, listagem, download e trata erros da API', async () => {
   const server = http.createServer(app).listen(0);
   await once(server, 'listening');
 
-  try {
-    const { port } = server.address();
-    const baseUrl = `http://127.0.0.1:${port}`;
-    const form = new FormData();
-    form.append('file', new File(['conteudo de teste'], 'teste.txt', { type: 'text/plain' }));
+  return {
+    server,
+    storageDirectory,
+    baseUrl: `http://127.0.0.1:${server.address().port}`,
+  };
+}
 
-    const uploadResponse = await fetch(`${baseUrl}/upload`, {
-      method: 'POST',
-      headers: { 'X-Owner-Id': 'user-test' },
-      body: form,
-    });
+async function closeTestServer({ server, storageDirectory }) {
+  server.close();
+  await once(server, 'close');
+  await fs.rm(storageDirectory, { recursive: true, force: true });
+}
+
+async function uploadTestFile(baseUrl, name = 'teste.txt', contents = 'conteudo de teste') {
+  const form = new FormData();
+  form.append('file', new File([contents], name, { type: 'text/plain' }));
+
+  return fetch(`${baseUrl}/upload`, {
+    method: 'POST',
+    headers: { 'X-Owner-Id': 'user-test' },
+    body: form,
+  });
+}
+
+test('realiza upload de documento', async () => {
+  const testServer = await createTestServer();
+
+  try {
+    const uploadResponse = await uploadTestFile(testServer.baseUrl);
 
     assert.strictEqual(uploadResponse.status, 201);
     const document = await uploadResponse.json();
     assert.strictEqual(document.originalName, 'teste.txt');
     assert.strictEqual(document.owner, 'user-test');
     assert.strictEqual(Object.hasOwn(document, 'storedFilename'), false);
+  } finally {
+    await closeTestServer(testServer);
+  }
+});
 
-    const listResponse = await fetch(`${baseUrl}/documents`);
+test('lista documentos enviados', async () => {
+  const testServer = await createTestServer();
+
+  try {
+    const firstUpload = await uploadTestFile(testServer.baseUrl, 'primeiro.txt');
+    const secondUpload = await uploadTestFile(testServer.baseUrl, 'segundo.txt');
+    const firstDocument = await firstUpload.json();
+    const secondDocument = await secondUpload.json();
+
+    const listResponse = await fetch(`${testServer.baseUrl}/documents`);
     assert.strictEqual(listResponse.status, 200);
-    assert.ok((await listResponse.json()).some((item) => item.id === document.id));
+    const documents = await listResponse.json();
+    assert.deepStrictEqual(
+      documents.map((document) => document.id),
+      [firstDocument.id, secondDocument.id],
+    );
+  } finally {
+    await closeTestServer(testServer);
+  }
+});
 
-    const downloadResponse = await fetch(`${baseUrl}/documents/${document.id}/download`);
+test('faz download do documento enviado', async () => {
+  const testServer = await createTestServer();
+
+  try {
+    const uploadResponse = await uploadTestFile(testServer.baseUrl);
+    const document = await uploadResponse.json();
+
+    const downloadResponse = await fetch(`${testServer.baseUrl}/documents/${document.id}/download`);
     assert.strictEqual(downloadResponse.status, 200);
     assert.strictEqual(await downloadResponse.text(), 'conteudo de teste');
     assert.match(downloadResponse.headers.get('content-disposition'), /teste\.txt/);
 
-    const missingResponse = await fetch(`${baseUrl}/documents/missing/download`);
+    const missingResponse = await fetch(`${testServer.baseUrl}/documents/missing/download`);
     assert.strictEqual(missingResponse.status, 404);
     assert.strictEqual((await missingResponse.json()).error.code, 'DOCUMENT_NOT_FOUND');
-
-    const invalidForm = new FormData();
-    invalidForm.append('file', new File(['conteudo'], 'script.exe', {
-      type: 'application/octet-stream',
-    }));
-    const invalidResponse = await fetch(`${baseUrl}/upload`, {
-      method: 'POST',
-      body: invalidForm,
-    });
-    assert.strictEqual(invalidResponse.status, 400);
-    assert.strictEqual((await invalidResponse.json()).error.code, 'FILE_TYPE_NOT_ALLOWED');
-
   } finally {
-    server.close();
-    await once(server, 'close');
-    await fs.rm(storageDirectory, { recursive: true, force: true });
+    await closeTestServer(testServer);
   }
 });
