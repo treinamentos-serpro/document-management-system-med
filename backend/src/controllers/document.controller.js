@@ -7,7 +7,7 @@ class DocumentController {
     try {
       const document = await this.service.createDocument({
         file: req.file,
-        owner: req.get('X-Owner-Id') || process.env.DEFAULT_OWNER || 'anonymous',
+        owner: req.get('X-Owner-Id'),
       });
 
       res.status(201).json(document);
@@ -30,15 +30,22 @@ class DocumentController {
     try {
       const document = await this.service.getDownload(req.params.id);
 
-      res.download(document.filePath, document.originalName, {
-        headers: { 'Content-Type': document.mimetype || 'application/octet-stream' },
-      }, (error) => {
-        if (error && !res.headersSent) {
+      res.status(200);
+      res.type(document.mimetype || 'application/octet-stream');
+      res.attachment(document.originalName);
+      res.setHeader('Content-Length', document.size);
+
+      const stream = document.fileHandle.createReadStream();
+      stream.on('error', (error) => {
+        if (!res.headersSent) {
           error.code = 'DOWNLOAD_ERROR';
           error.statusCode = 500;
           next(error);
+        } else {
+          res.destroy(error);
         }
       });
+      stream.pipe(res);
     } catch (error) {
       next(error);
     }

@@ -10,15 +10,46 @@ async function parseError(response) {
 }
 
 async function request(path, options = {}) {
-  const response = await fetch(`${API_PREFIX}${path}`, options);
+  const { signal, timeout = 15000, ...fetchOptions } = options;
+  let timeoutController;
+  let removeAbortListener;
+  let requestOptions = fetchOptions;
+  let timeoutId;
 
-  if (!response.ok) {
-    const error = new Error(await parseError(response));
-    error.status = response.status;
-    throw error;
+  if (signal) {
+    timeoutController = new AbortController();
+    const abortRequest = () => timeoutController.abort();
+    signal.addEventListener('abort', abortRequest, { once: true });
+    removeAbortListener = () => signal.removeEventListener('abort', abortRequest);
+    requestOptions = { ...fetchOptions, signal: timeoutController.signal };
   }
 
-  return response;
+  try {
+    const responsePromise = fetch(`${API_PREFIX}${path}`, requestOptions);
+    const timeoutPromise = new Promise((resolve, reject) => {
+      timeoutId = setTimeout(() => {
+        timeoutController?.abort();
+        const error = new Error('A requisição excedeu o tempo limite.');
+        error.name = 'TimeoutError';
+        reject(error);
+      }, timeout);
+    });
+    const response = await Promise.race([responsePromise, timeoutPromise]);
+
+    if (!response.ok) {
+      const error = new Error(await parseError(response));
+      error.status = response.status;
+      throw error;
+    }
+
+    return response;
+  } finally {
+    clearTimeout(timeoutId);
+    removeAbortListener?.();
+    if (signal && timeoutController) {
+      timeoutController.abort();
+    }
+  }
 }
 
 export async function listDocuments(options = {}) {

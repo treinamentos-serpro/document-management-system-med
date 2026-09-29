@@ -2,18 +2,23 @@ const { test } = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs/promises');
 const http = require('node:http');
-const path = require('node:path');
+const os = require('node:os');
 const { once } = require('node:events');
-const app = require('../src/app');
+const appModule = require('../src/app');
+const { createConfig } = require('../src/config');
 
 // Teste de fumaça do seed: garante que o app Express foi exportado.
 // Novos testes serão adicionados durante os Steps 2, 6 e 7 com auxílio do Copilot.
 test('o app backend é exportado', () => {
-  assert.ok(app, 'o app deve estar definido');
-  assert.strictEqual(typeof app, 'function', 'o app Express deve ser uma função');
+  assert.ok(appModule, 'o app deve estar definido');
+  assert.strictEqual(typeof appModule, 'function', 'o app Express deve ser uma função');
 });
 
 test('realiza upload, listagem, download e trata erros da API', async () => {
+  const storageDirectory = await fs.mkdtemp(`${os.tmpdir()}/dms-test-`);
+  const app = appModule.createApp({
+    config: createConfig({ STORAGE_DIRECTORY: storageDirectory }),
+  });
   const server = http.createServer(app).listen(0);
   await once(server, 'listening');
 
@@ -59,15 +64,9 @@ test('realiza upload, listagem, download e trata erros da API', async () => {
     assert.strictEqual(invalidResponse.status, 400);
     assert.strictEqual((await invalidResponse.json()).error.code, 'FILE_TYPE_NOT_ALLOWED');
 
-    const storageDirectory = path.resolve(__dirname, '../storage');
-    await fs.unlink(path.join(storageDirectory, 'teste.txt')).catch(() => {});
-    const storageEntries = await fs.readdir(storageDirectory);
-    const generatedFile = storageEntries.find((entry) => entry.endsWith('.txt'));
-    if (generatedFile) {
-      await fs.unlink(path.join(storageDirectory, generatedFile));
-    }
   } finally {
     server.close();
     await once(server, 'close');
+    await fs.rm(storageDirectory, { recursive: true, force: true });
   }
 });
