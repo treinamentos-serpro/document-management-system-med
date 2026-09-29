@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import DocumentList from './components/DocumentList.jsx';
 import UploadComponent from './components/UploadComponent.jsx';
 import { listDocuments } from './services/api.js';
@@ -8,36 +8,35 @@ export default function App() {
   const [documents, setDocuments] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
+  const requestRef = useRef({ id: 0, controller: null });
 
   async function refreshDocuments() {
+    const requestId = requestRef.current.id + 1;
+    requestRef.current.controller?.abort();
+    const controller = new AbortController();
+    requestRef.current = { id: requestId, controller };
     setIsLoading(true);
     setError('');
 
     try {
-      setDocuments(await listDocuments());
+      const loadedDocuments = await listDocuments({ signal: controller.signal });
+      if (requestRef.current.id === requestId) {
+        setDocuments(loadedDocuments);
+      }
     } catch (loadError) {
-      setError(loadError.message);
+      if (loadError.name !== 'AbortError' && requestRef.current.id === requestId) {
+        setError(loadError.message);
+      }
     } finally {
-      setIsLoading(false);
+      if (requestRef.current.id === requestId) {
+        setIsLoading(false);
+      }
     }
   }
 
   useEffect(() => {
-    let active = true;
-
-    async function loadInitialDocuments() {
-      try {
-        const loadedDocuments = await listDocuments();
-        if (active) setDocuments(loadedDocuments);
-      } catch (loadError) {
-        if (active) setError(loadError.message);
-      } finally {
-        if (active) setIsLoading(false);
-      }
-    }
-
-    loadInitialDocuments();
-    return () => { active = false; };
+    refreshDocuments();
+    return () => requestRef.current.controller?.abort();
   }, []);
 
   return (

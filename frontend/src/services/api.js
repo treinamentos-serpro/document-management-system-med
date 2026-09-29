@@ -21,8 +21,8 @@ async function request(path, options = {}) {
   return response;
 }
 
-export async function listDocuments() {
-  const response = await request('/documents');
+export async function listDocuments(options = {}) {
+  const response = await request('/documents', options);
   return response.json();
 }
 
@@ -42,8 +42,13 @@ export async function uploadDocument(file, owner) {
 
 function getFilename(response, fallback) {
   const disposition = response.headers.get('content-disposition');
-  const filename = disposition?.match(/filename="?([^";]+)"?/i)?.[1];
-  return filename || fallback;
+  const encodedFilename = disposition?.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
+
+  if (encodedFilename) {
+    return decodeURIComponent(encodedFilename);
+  }
+
+  return disposition?.match(/filename="?([^";]+)"?/i)?.[1] || fallback;
 }
 
 export async function downloadDocument(document) {
@@ -55,5 +60,5 @@ export async function downloadDocument(document) {
   link.href = url;
   link.download = getFilename(response, document.originalName);
   link.click();
-  URL.revokeObjectURL(url);
+  setTimeout(() => URL.revokeObjectURL(url), 0);
 }
